@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>フォルダ・ファイル検索</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #fff; --text: #1f2328; --sub: #6a737d; --line: #dfe3e8;
+    --accent: #1a6fd1; --accent-bg: #e8f1fc; --mark: #ffe58a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16181c; --panel: #1f2227; --text: #e6e8eb; --sub: #9aa3ad; --line: #343a42;
+      --accent: #6aaeff; --accent-bg: #22344c; --mark: #6b5a12;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.5 "Yu Gothic UI", "Meiryo UI", system-ui, sans-serif; }
+  header { position: sticky; top: 0; z-index: 5; background: var(--panel);
+           border-bottom: 1px solid var(--line); padding: 12px 16px; }
+  .wrap { max-width: 1000px; margin: 0 auto; }
+  h1 { font-size: 15px; margin: 0 0 8px; display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+  h1 small { font-weight: normal; color: var(--sub); font-size: 12px; }
+  #q { width: 100%; font-size: 17px; padding: 10px 12px; border: 2px solid var(--line);
+       border-radius: 8px; background: var(--bg); color: var(--text); }
+  #q:focus { outline: none; border-color: var(--accent); }
+  .opts { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 8px; align-items: center; color: var(--sub); font-size: 13px; }
+  .opts select, .opts button { font: inherit; padding: 3px 6px; border: 1px solid var(--line);
+       border-radius: 6px; background: var(--panel); color: var(--text); }
+  .opts label { display: inline-flex; gap: 4px; align-items: center; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; background: var(--accent-bg);
+          color: var(--accent); padding: 2px 4px 2px 10px; border-radius: 14px; font-size: 13px; }
+  .chip button { border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 15px; line-height: 1; }
+  main { padding: 12px 16px 60px; }
+  #status { color: var(--sub); margin: 4px 0 10px; font-size: 13px; }
+  .hint { color: var(--sub); background: var(--panel); border: 1px solid var(--line);
+          border-radius: 8px; padding: 14px 16px; }
+  .hint ul { margin: 6px 0 0; padding-left: 20px; }
+  .row { background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+         padding: 8px 12px; margin-bottom: 6px; }
+  .row .name { font-size: 15px; font-weight: 600; word-break: break-all; }
+  .row .name a, .row .name button.dirlink { color: var(--text); text-decoration: none; font: inherit;
+         border: 0; background: none; padding: 0; cursor: pointer; text-align: left; }
+  .row .name a:hover, .row .name button.dirlink:hover { color: var(--accent); text-decoration: underline; }
+  .crumb { color: var(--sub); font-size: 12.5px; word-break: break-all; }
+  .crumb button { border: 0; background: none; color: var(--sub); cursor: pointer; padding: 0; font: inherit; }
+  .crumb button:hover { color: var(--accent); text-decoration: underline; }
+  .meta { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; margin-top: 2px;
+          color: var(--sub); font-size: 12px; }
+  .meta button { font: inherit; font-size: 12px; padding: 1px 8px; border: 1px solid var(--line);
+          border-radius: 5px; background: var(--bg); color: var(--text); cursor: pointer; }
+  .meta button:hover { border-color: var(--accent); color: var(--accent); }
+  mark { background: var(--mark); color: inherit; border-radius: 2px; }
+  #more { display: block; margin: 12px auto; padding: 8px 24px; font: inherit; border: 1px solid var(--line);
+          border-radius: 8px; background: var(--panel); color: var(--text); cursor: pointer; }
+  .warn { color: #b35c00; }
+</style>
+</head>
+<body>
+<header><div class="wrap">
+  <h1>フォルダ・ファイル検索 <small id="info"></small></h1>
+  <input id="q" type="search" placeholder="キーワードを入力(スペース区切りでAND、-語 で除外)" autocomplete="off" autofocus>
+  <div class="opts">
+    <label>種類
+      <select id="kind"><option value="all">すべて</option><option value="file">ファイル</option><option value="dir">フォルダ</option></select>
+    </label>
+    <label>拡張子 <select id="ext"><option value="">すべて</option></select></label>
+    <label>更新年 <select id="y1"></select> 〜 <select id="y2"></select></label>
+    <label>並び順
+      <select id="sort">
+        <option value="rel">関連順</option>
+        <option value="new">更新日が新しい</option>
+        <option value="old">更新日が古い</option>
+        <option value="name">名前順</option>
+        <option value="size">サイズが大きい</option>
+      </select>
+    </label>
+    <label><input type="checkbox" id="nameOnly"> ファイル名のみ検索</label>
+    <span id="prefixChip"></span>
+  </div>
+</div></header>
+<main><div class="wrap">
+  <div id="status"></div>
+  <div id="list"></div>
+  <button id="more" hidden>さらに表示</button>
+</div></main>
+
+<script>
+const DATA = /*__DATA__*/null;
+(function () {
+  "use strict";
+  const $ = id => document.getElementById(id);
+  if (!DATA) {
+    $("list").innerHTML = '<div class="hint warn">検索データが埋め込まれていません。「検索インデックス作成.bat」で作成した「検索画面.html」を開いてください。</div>';
+    return;
+  }
+
+  // 全角半角・大文字小文字・ひらがなカタカナの違いを吸収する
+  function norm(s) {
+    return s.normalize("NFKC").toLowerCase()
+      .replace(/[ァ-ヶ]/g, c => String.fromCharCode(c.charCodeAt(0) - 0x60));
+  }
+
+  const SEP = "\\";
+  const root = DATA.root;
+  const items = [];
+  const extCount = new Map();
+  let minY = 9999, maxY = 0, fileCount = 0;
+
+  DATA.dirs.forEach((rel, i) => {
+    if (i === 0) return;
+    const k = rel.lastIndexOf(SEP);
+    items.push({ n: rel.slice(k + 1), p: k < 0 ? "" : rel.slice(0, k), dir: true, s: 0, t: 0, y: 0, e: "", h: norm(rel) });
+  });
+  DATA.files.forEach(f => {
+    const p = DATA.dirs[f[0]], n = f[1], t = f[3];
+    const dot = n.lastIndexOf(".");
+    const e = dot > 0 ? n.slice(dot + 1).toLowerCase() : "";
+    const y = new Date(t * 1000).getFullYear();
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+    if (e) extCount.set(e, (extCount.get(e) || 0) + 1);
+    items.push({ n, p, dir: false, s: f[2], t, y, e, h: norm(p ? p + SEP + n : n) });
+    fileCount++;
+  });
+  const score = new Uint8Array(items.length);
+
+  // ---- 画面の初期化 ----
+  $("info").textContent = `${root} ／ ファイル ${fileCount.toLocaleString()} 件・フォルダ ${(DATA.dirs.length - 1).toLocaleString()} 件 ／ 作成日時 ${DATA.scanned}(これ以降の変更は反映されません)`;
+  [...extCount.entries()].sort((a, b) => b[1] - a[1]).slice(0, 60).forEach(([e, c]) => {
+    const o = document.createElement("option");
+    o.value = e; o.textContent = `.${e} (${c.toLocaleString()})`;
+    $("ext").appendChild(o);
+  });
+  ["y1", "y2"].forEach(id => {
+    const s = $(id);
+    s.appendChild(new Option("指定なし", ""));
+    for (let y = maxY; y >= minY && maxY > 0; y--) s.appendChild(new Option(y + "年", y));
+  });
+
+  let prefix = "";            // フォルダ絞り込み(rootからの相対パス)
+  let lastRes = [], shown = 0;
+  const PAGE = 100;
+
+  function fmtDate(t) {
+    if (!t) return "";
+    const d = new Date(t * 1000);
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
+  function fmtSize(b) {
+    if (b < 1024) return b + " B";
+    if (b < 1048576) return (b / 1024).toFixed(1) + " KB";
+    if (b < 1073741824) return (b / 1048576).toFixed(1) + " MB";
+    return (b / 1073741824).toFixed(2) + " GB";
+  }
+  function fullPath(it, folderOnly) {
+    const rel = folderOnly ? it.p : (it.p ? it.p + SEP + it.n : it.n);
+    return rel ? root + SEP + rel : root;
+  }
+  function fileUrl(full) {
+    let u = full.replace(/\\/g, "/");
+    u = u.startsWith("//") ? "file:" + u : "file:///" + u;
+    return encodeURI(u).replace(/#/g, "%23").replace(/\?/g, "%3F");
+  }
+  async function copy(text, btn) {
+    try { await navigator.clipboard.writeText(text); }
+    catch (e) {
+      const ta = document.createElement("textarea");
+      ta.value = text; document.body.appendChild(ta); ta.select();
+      document.execCommand("copy"); ta.remove();
+    }
+    const old = btn.textContent; btn.textContent = "コピーしました";
+    setTimeout(() => { btn.textContent = old; }, 1200);
+  }
+
+  // 検索語を強調表示する(NFKCで文字数が変わる名前は強調なし)
+  function hl(text, terms) {
+    const frag = document.createDocumentFragment();
+    const nt = norm(text);
+    if (!terms.length || nt.length !== text.length) { frag.append(text); return frag; }
+    const m = new Uint8Array(text.length);
+    terms.forEach(t => {
+      let p = 0;
+      while ((p = nt.indexOf(t, p)) >= 0) { m.fill(1, p, p + t.length); p += t.length; }
+    });
+    let i = 0;
+    while (i < text.length) {
+      let j = i; while (j < text.length && m[j] === m[i]) j++;
+      const seg = text.slice(i, j);
+      if (m[i]) { const k = document.createElement("mark"); k.textContent = seg; frag.append(k); }
+      else frag.append(seg);
+      i = j;
+    }
+    return frag;
+  }
+
+  function setPrefix(p) { prefix = p; renderChip(); run(); window.scrollTo(0, 0); }
+  function renderChip() {
+    const c = $("prefixChip"); c.textContent = "";
+    if (!prefix) return;
+    const s = document.createElement("span"); s.className = "chip";
+    s.append("フォルダ内: " + prefix);
+    const b = document.createElement("button"); b.textContent = "×"; b.title = "絞り込みを解除";
+    b.onclick = () => setPrefix("");
+    s.append(b); c.append(s);
+  }
+
+  // ---- 検索 ----
+  function run() {
+    const nq = norm($("q").value);
+    const pos = [], neg = [];
+    nq.split(/\s+/).filter(Boolean).forEach(t => {
+      if (t[0] === "-" && t.length > 1) neg.push(t.slice(1)); else pos.push(t);
+    });
+    const kind = $("kind").value, ext = $("ext").value;
+    const y1 = +$("y1").value || 0, y2 = +$("y2").value || 0;
+    const nameOnly = $("nameOnly").checked;
+    const pre = prefix ? norm(prefix) : "";
+    const active = pos.length || neg.length || kind !== "all" || ext || y1 || y2 || pre;
+
+    try { history.replaceState(null, "", "#" + encodeURIComponent($("q").value)); } catch (e) { /* file:// で不許可の環境では無視 */ }
+    if (!active) {
+      lastRes = []; shown = 0; $("list").textContent = ""; $("more").hidden = true;
+      $("status").textContent = "";
+      const h = document.createElement("div"); h.className = "hint";
+      h.innerHTML = "<b>使い方</b><ul>" +
+        "<li>キーワードはフォルダ名・ファイル名の両方が対象です。<b>スペース区切り</b>で絞り込めます(例: <code>2019 契約 見積</code>)。</li>" +
+        "<li><code>-キーワード</code> で除外できます。全角/半角・大文字/小文字・ひらがな/カタカナは区別しません。</li>" +
+        "<li>結果のフォルダ階層をクリックすると、そのフォルダ内に絞り込めます。</li>" +
+        "<li>「パスをコピー」→ エクスプローラーのアドレスバーに貼り付けると開けます。</li></ul>";
+      $("list").append(h);
+      return;
+    }
+
+    const res = [];
+    outer:
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      if (kind === "file" && it.dir) continue;
+      if (kind === "dir" && !it.dir) continue;
+      if (ext && it.e !== ext) continue;
+      if (y1 || y2) { if (it.dir) continue; if (y1 && it.y < y1) continue; if (y2 && it.y > y2) continue; }
+      const h = it.h;
+      if (pre && h !== pre && !h.startsWith(pre + SEP)) continue;
+      const nameStart = h.lastIndexOf(SEP) + 1;
+      const text = nameOnly ? h.slice(nameStart) : h;
+      for (const t of pos) if (text.indexOf(t) < 0) continue outer;
+      for (const t of neg) if (text.indexOf(t) >= 0) continue outer;
+      let sc = 1;
+      if (pos.length) {
+        const nm = nameOnly ? text : h.slice(nameStart);
+        sc = pos.every(t => nm.indexOf(t) >= 0) ? 0 : 1;
+      }
+      score[i] = sc;
+      res.push(i);
+    }
+
+    const sort = $("sort").value;
+    const cmp = {
+      rel: (a, b) => score[a] - score[b] || items[a].h.length - items[b].h.length,
+      new: (a, b) => items[b].t - items[a].t,
+      old: (a, b) => (items[a].t || 1e12) - (items[b].t || 1e12),
+      name: (a, b) => items[a].n.localeCompare(items[b].n, "ja"),
+      size: (a, b) => items[b].s - items[a].s,
+    }[sort];
+    res.sort(cmp);
+
+    lastRes = res; shown = 0;
+    $("list").textContent = "";
+    $("status").textContent = res.length ? `${res.length.toLocaleString()} 件ヒット` : "該当するものがありません";
+    window.currentTerms = pos;
+    renderMore();
+  }
+
+  function renderMore() {
+    const terms = window.currentTerms || [];
+    const end = Math.min(lastRes.length, shown + PAGE);
+    const frag = document.createDocumentFragment();
+    for (let k = shown; k < end; k++) frag.append(rowEl(items[lastRes[k]], terms));
+    $("list").append(frag);
+    shown = end;
+    $("more").hidden = shown >= lastRes.length;
+    $("more").textContent = `さらに表示(残り ${(lastRes.length - shown).toLocaleString()} 件)`;
+  }
+
+  function rowEl(it, terms) {
+    const row = document.createElement("div"); row.className = "row";
+
+    const nm = document.createElement("div"); nm.className = "name";
+    if (it.dir) {
+      const b = document.createElement("button"); b.className = "dirlink";
+      b.append("📁 ", hl(it.n, terms));
+      b.title = "このフォルダ内に絞り込む";
+      b.onclick = () => setPrefix(it.p ? it.p + SEP + it.n : it.n);
+      nm.append(b);
+    } else {
+      const a = document.createElement("a");
+      a.href = fileUrl(fullPath(it)); a.target = "_blank"; a.rel = "noopener";
+      a.title = "開く(ブラウザの設定によっては開けない場合があります)";
+      a.append("📄 ", hl(it.n, terms));
+      nm.append(a);
+    }
+    row.append(nm);
+
+    const cr = document.createElement("div"); cr.className = "crumb";
+    const segs = it.p ? it.p.split(SEP) : [];
+    const rootBtn = document.createElement("button"); rootBtn.textContent = "ルート";
+    rootBtn.onclick = () => setPrefix("");
+    cr.append(rootBtn);
+    segs.forEach((sg, i) => {
+      cr.append(" ▸ ");
+      const b = document.createElement("button");
+      b.append(hl(sg, terms));
+      const target = segs.slice(0, i + 1).join(SEP);
+      b.onclick = () => setPrefix(target);
+      cr.append(b);
+    });
+    row.append(cr);
+
+    const meta = document.createElement("div"); meta.className = "meta";
+    if (!it.dir) {
+      meta.append(fmtDate(it.t), fmtSize(it.s));
+    }
+    const b1 = document.createElement("button"); b1.textContent = "パスをコピー";
+    b1.onclick = () => copy(fullPath(it), b1);
+    meta.append(b1);
+    if (!it.dir) {
+      const b2 = document.createElement("button"); b2.textContent = "フォルダの場所をコピー";
+      b2.onclick = () => copy(fullPath(it, true), b2);
+      meta.append(b2);
+    }
+    row.append(meta);
+    return row;
+  }
+
+  // ---- イベント ----
+  let timer = 0;
+  $("q").addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(run, 150); });
+  ["kind", "ext", "y1", "y2", "sort", "nameOnly"].forEach(id => $(id).addEventListener("change", run));
+  $("more").addEventListener("click", renderMore);
+
+  if (location.hash.length > 1) {
+    try { $("q").value = decodeURIComponent(location.hash.slice(1)); } catch (e) { /* 無視 */ }
+  }
+  run();
+})();
+</script>
+</body>
+</html>
